@@ -54,6 +54,7 @@ our @EXPORT_OK = qw(
             MGI
             Mouse
             NONE
+	    RNAi
             species);
 
 use constant {
@@ -73,6 +74,7 @@ use constant {
   Mouse     => 'Mouse',
 
   NONE      => 'NONE',
+  RNAi	    => 'RNAi',	
 };
 
 use constant species => ( 'RGD'       => ['rattus_norvegicus'],
@@ -96,7 +98,8 @@ use constant species => ( 'RGD'       => ['rattus_norvegicus'],
                           'ontology'  => ['homo_sapiens', 'gallus_gallus',
                                           'sus_scrofa', 'bos_taurus',
                                           'equus_caballus', 'ovis_aries',
-                                          'capra_hircus', 'canis_familiaris']
+                                          'capra_hircus', 'canis_familiaris'],
+			  'RNAi'      => ['schistosoma_mansoni']
                         );
 
 1;
