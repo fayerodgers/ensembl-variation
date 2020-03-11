@@ -33,7 +33,7 @@ package Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::InitPhenotypeAnn
 use strict;
 use warnings;
 
-use Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::Constants qw(RGD AnimalQTL ZFIN GWAS OMIA EGA Orphanet MIMmorbid DDG2P CGC IMPC MGI Mouse NONE species);
+use Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::Constants qw(RGD AnimalQTL ZFIN GWAS OMIA EGA Orphanet MIMmorbid DDG2P CGC IMPC MGI Mouse NONE RNAi species);
 
 use base qw(Bio::EnsEMBL::Variation::Pipeline::BaseVariationProcess);
 
@@ -101,6 +101,8 @@ sub write_output {
       print $logPipeFH "Passing to CancerGeneConsensus import: ".scalar @{$self->param('output_ids')}." species\n" if $self->param('debug_mode');
     } elsif ( $run_type eq IMPC || $run_type eq MGI || $run_type eq Mouse){
       $self->dataflow_output_id($self->param('output_ids'), 12);
+    } elsif ( $run_type eq RNAi){
+      $self->dataflow_output_id($self->param('output_ids'), 13);
       print $logPipeFH "Passing to $run_type import \n" if $self->param('debug_mode');
     }
   }
