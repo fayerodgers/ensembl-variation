@@ -188,6 +188,7 @@ sub pipeline_analyses {
                 '10->A'=> [ 'import_ddg2p' ],
                 '11->A'=> [ 'import_cancerGC' ],
                 '12->A'=> [ 'import_mouse' ],
+		'13->A'=> ['import_rnai'],
                 'A->1' => [ 'finish_pipeline' ],
             },
         },
@@ -366,6 +367,19 @@ sub pipeline_analyses {
 
         {   -logic_name => 'import_mgi',
             -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMGI',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_phenotypes']
+            },
+            -failed_job_tolerance => 5, # tries 5 times to run a job
+        },
+        {   -logic_name => 'import_rnai',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportRNAi',
             -parameters => {
                 @common_params,
             },
