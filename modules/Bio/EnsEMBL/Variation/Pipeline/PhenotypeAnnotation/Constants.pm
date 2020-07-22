@@ -99,7 +99,7 @@ use constant species => ( 'RGD'       => ['rattus_norvegicus'],
                                           'sus_scrofa', 'bos_taurus',
                                           'equus_caballus', 'ovis_aries',
                                           'capra_hircus', 'canis_familiaris'],
-			  'RNAi'      => ['schistosoma_mansoni']
+			  'RNAi'      => ['schistosoma_mansoni_prjea36577']
                         );
 
 1;
