@@ -165,6 +165,10 @@ my %SOURCES = (
     url => "http://www.informatics.jax.org/",
     type => "Gene",  
   },
+  "RNAi_study" => {
+    description => "An RNAi screen",
+    type => "Gene",
+  }
 
 );
 
@@ -214,7 +218,7 @@ if (! ($source =~ m/^impc/i || ($source =~ m/^mgi/i) )) {
   die ("A source (--source) is required") unless (defined($source));
   die ("A source version (--version) is required") unless (defined($source_version));
 }
-$port  ||= 3306;
+$port  ||= $port;
 $cport ||= $port;
 $chost ||= $host;
 $cuser ||= $user;
@@ -456,6 +460,11 @@ elsif ($source =~ m/^impc/i || $source =~ m/^mgi/i) {
   clear_mouse_phenotype_data_from_last_release($mouse_phenotype_source_ids);
   my $marker_coords = get_marker_coords($infile, $coord_file);
   $result = parse_mouse_phenotype_data($infile, $marker_coords, $data_source, $mouse_phenotype_source_ids);
+}
+
+elsif ($source =~ m/^rnai_study$/i){
+    $result = parse_rnai_study($infile, $core_db_adaptor); 
+    $source_name = 'RNAi_study'
 }
 
 else {
@@ -1995,6 +2004,41 @@ sub parse_zfin {
   
   return {'phenotypes' => \@phenotypes};
 }
+
+sub parse_rnai_study{
+	my $infile = shift;
+	my $core_db_adaptor = shift;
+	my @phenotypes;
+  	my $ga = $core_db_adaptor->get_GeneAdaptor;
+  	die("ERROR: Could not get gene adaptor") unless defined($ga);
+
+	# Open the input file for reading
+	if($infile =~ /gz$/) {
+		open IN, "zcat $infile |" or die ("Could not open $infile for reading");
+	}
+	else {
+		open(IN,'<',$infile) or die ("Could not open $infile for reading");
+    }
+
+  # Read through the file and parse out the desired fields
+	while (<IN>) {
+		chomp;
+		my ($gene_id, $phen) = split /\t/;
+		my $gene = $ga->fetch_by_stable_id($gene_id);
+		push @phenotypes, {
+      		'id' => $gene_id,
+      		'description' => $phen,
+		'seq_region_id' => $gene->slice->get_seq_region_id,
+		'seq_region_start' => $gene->seq_region_start,
+		'seq_region_end' => $gene->seq_region_end,
+		'seq_region_strand' => $gene->seq_region_strand,
+		};
+	}
+
+	return {'phenotypes' => \@phenotypes};
+
+}
+
 
 sub get_mouse_phenotype_data_source_ids {
   my $phenotype_file = shift;

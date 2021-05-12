@@ -74,7 +74,7 @@ sub fetch_input {
 	
   #find data file
   my $inputFile = 'RNAi_phenotypes.txt';
-  die "expected $workDir/$inputFile" unless -e $workdir."/".$inputFile;
+  die "expected $workdir/$inputFile" unless -e $workdir."/".$inputFile;
 
   $self->param('RNAi_file', $inputFile);
 
@@ -147,7 +147,8 @@ sub parse_input_file {
     push @phenotypes, {
     'id' 	  => $gene_id,
     'description' => $phenotype,
-    'study'	  => $study
+    'study'	  => $study,
+    'external_id' => $gene_id
     };
 
   }
