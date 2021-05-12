@@ -1,5 +1,5 @@
 -- Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
--- Copyright [2016-2019] EMBL-European Bioinformatics Institute
+-- Copyright [2016-2020] EMBL-European Bioinformatics Institute
 -- 
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -406,6 +406,7 @@ CREATE TABLE IF NOT EXISTS `phenotype_feature_attrib` (
 @column stable_id            Ensembl stable identifier for the phenotype
 @column name                 Phenotype short name. e.g. "CAD".
 @column description varchar  Phenotype long name. e.g. "Coronary Artery Disease".
+@column class_attrib_id      Class of phenotype entry, eg trait, non_specified, tumour - used for filtering
 
 @see phenotype_feature
 */
@@ -415,6 +416,7 @@ CREATE TABLE `phenotype` (
   `stable_id` VARCHAR(255) DEFAULT NULL,
   `name` VARCHAR(50) DEFAULT NULL,
   `description` VARCHAR(255) DEFAULT NULL,
+  `class_attrib_id` INT DEFAULT NULL,
   PRIMARY KEY (`phenotype_id`),
   KEY `name_idx` (`name`),
   UNIQUE KEY `desc_idx` (`description`),
@@ -1192,6 +1194,8 @@ CREATE TABLE structural_variation_association (
 @column somatic                          Flags whether this structural variation is known to be somatic or not
 @column breakpoint_order                 Defines the order of the breakpoints when several events/mutation occurred for a structural variation (e.g. somatic mutations)
 @column length                           Length of the structural variant. Used for the variants with a class "insertion", when the size of the insertion is known.
+@column allele_freq                      The frequency reported for this allele in this study.
+@column allele_count                     The number of times this allele is observed in this study.
 
 @see structural_variation
 @see source
@@ -1231,6 +1235,8 @@ CREATE TABLE structural_variation_feature (
           '49','50','51','52','53','54','55','56',
           '57','58','59','60','61','62','63','64'
   ) NOT NULL DEFAULT '',
+  allele_freq FLOAT DEFAULT NULL,
+  allele_count INT(10) UNSIGNED DEFAULT NULL,
 	
   PRIMARY KEY (structural_variation_feature_id),
 	KEY pos_idx ( seq_region_id, seq_region_start, seq_region_end ),
@@ -1763,7 +1769,7 @@ CREATE TABLE publication (
 CREATE TABLE variation_citation (
    variation_id INT(10) UNSIGNED NOT NULL,
    publication_id INT(10) UNSIGNED NOT NULL,
-   data_source_attrib SET('615','616','617') DEFAULT NULL, 
+   data_source_attrib SET('615','616','617','618','619','620') DEFAULT NULL, 
    PRIMARY KEY variation_citation_idx (variation_id, publication_id),
    KEY data_source_attrib_idx (data_source_attrib)
 );
@@ -1826,15 +1832,12 @@ CREATE TABLE meta (
 
 
 # Add schema type and schema version to the meta table.
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'schema_type', 'variation'), (NULL, 'schema_version', '99');
+INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'schema_type', 'variation'), (NULL, 'schema_version', '101');
 
 
 # Patch IDs for new release
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_98_99_a.sql|schema version');
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_98_99_b.sql|Add the column data_source_attrib in the table variation_citation');
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_98_99_c.sql|Increase the size of the title and doi columns in the publication table');
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_98_99_d.sql|add key data_source_attrib');
-INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_98_99_e.sql|Fix attrib ids in table variation_citation');
+INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_100_101_a.sql|schema version');
+INSERT INTO meta (species_id, meta_key, meta_value) VALUES (NULL, 'patch', 'patch_100_101_b.sql|Add new data_source_attrib to variation_citation');
 
 /**
 @header  Failed tables

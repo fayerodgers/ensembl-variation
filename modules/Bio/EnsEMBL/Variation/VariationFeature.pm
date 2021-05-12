@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -729,10 +729,7 @@ sub get_all_MotifFeatureVariations {
   }
 
   if(!exists($self->{motif_feature_variations})) {
-    # We couldn't store motif_feature_variation for human in release/94
-    # compute them on the fly instead
-    my $species = lc $self->adaptor->db->species if (defined $self->adaptor->db);
-    if($self->dbID && ($species !~ /homo_sapiens|human/)) {
+    if($self->dbID) {
       if (my $db = $self->adaptor->db) {
         my $mfva = $db->get_MotifFeatureVariationAdaptor;
         my $mfvs = $mfva->fetch_all_by_VariationFeatures([$self]);
@@ -1812,11 +1809,18 @@ sub _get_flank_seq{
   my $ref_slice = $self->slice();
 
   #### find flank size needed for checking
+  
+  ## In the case of long indels, 
   my $add_length = 100;  ## allow at least 100 for 3'shifting
+  my $shift_length = 50;
+  my $flank_length = $add_length - $shift_length;
+  ## To ensure that the flanking sequence obtained is sufficiently long for variants that are both
+  ## long insertions/deletions and in repeated regions, we ensure that the minimal length of flanking 
+  ## sequence returned is the length of the variant + 50 bases
   my @allele = split(/\//,$self->allele_string());
   foreach my $al(@allele){ ## alleles be longer
-    if(length($al) > $add_length){
-      $add_length = length $al ;
+    if(length($al) > ($flank_length) ){
+      $add_length = length($al) + $shift_length ;
     }
   }
 
@@ -2099,7 +2103,7 @@ sub spdi_genomic{
   expand(\$ref_allele);
 
   # Throw exception if reference allele contains weird characters. Example reference allele: (53 BP INSERTION) 
-  if( $ref_allele =~ m/[^ACGT\-]$/ig ){
+  if( $ref_allele =~ m/[^ACGTN\-]$/ig ){
     throw("No supported SPDI genomic is available for Variation Feature $reference_name:$vf_start-$vf_end ($vf_strand)"); 
   } 
 
@@ -2113,7 +2117,7 @@ sub spdi_genomic{
     expand(\$alt_allele);
 
     # Skip if the allele contains weird characters
-    next if $alt_allele =~ m/[^ACGT\-]/ig;
+    next if $alt_allele =~ m/[^ACGTN\-]/ig;
 
     ##### vf strand is relative to slice
     my $flip_allele = 0;
@@ -2154,7 +2158,7 @@ sub spdi_genomic{
 
     # If variation feature is on the reverse strand then flip alleles (SPDI format is only reported on forward strand)
     # If variation is a deletion >20 bp then the deleted allele is represented by the sequence length (NC_000002:47403326:29:) and it doesn't need to be flipped  
-    if($flip_allele == 1 && $spdi_ref_allele =~ m/^[ACGT]*$/i){ 
+    if($flip_allele == 1 && $spdi_ref_allele =~ m/^[ACGTN]*$/i){
       reverse_comp(\$spdi_ref_allele) if( $spdi_ref_allele );  
       reverse_comp(\$spdi_alt_allele) if( $spdi_alt_allele );
     } 

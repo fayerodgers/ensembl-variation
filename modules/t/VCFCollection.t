@@ -1,5 +1,5 @@
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2019] EMBL-European Bioinformatics Institute
+# Copyright [2016-2020] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -213,6 +213,34 @@ is_deeply(
     'p:ESP6500:EA genotype:A|C f:0.0002 c:1'
   ],
   'get_all_PopulationGenotypes_by_VariationFeature - freqs and counts ESP rs80359165'
+);
+
+ok($coll->vcf_collection_close, 'close VCF collection filehandle after ESP annotation');
+
+## test get synonyms by chr in offline mode
+## chromosomes in VCF file start with chr
+
+$coll = $vca->fetch_by_id('esp_GRCh37_chr_synonym');
+$coll->use_db(0);
+ok($coll && $coll->isa('Bio::EnsEMBL::Variation::VCFCollection'), "fetch_by_id esp_GRCh37");
+$temp = $coll->filename_template();
+$temp =~ s/###t\-root###/$dir/;
+$coll->filename_template($temp);
+$coll->filename_template =~ /^$dir/;
+@alleles = @{$coll->get_all_Alleles_by_VariationFeature($vf)};
+is_deeply(
+  [
+    map {'p:'.$_->population->name.' a:'.$_->allele.' f:'.sprintf("%.4g", $_->frequency).' c:'.$_->count}
+    sort {$a->population->name cmp $b->population->name || $a->allele cmp $b->allele}
+    @alleles
+  ],
+  [
+    'p:ESP6500:AA a:A f:1 c:4406',
+    'p:ESP6500:AA a:C f:0 c:0',
+    'p:ESP6500:EA a:A f:0.9999 c:8597',
+    'p:ESP6500:EA a:C f:0.0001163 c:1'
+  ],
+  'get_all_Alleles_by_VariationFeature - freqs and counts ESP rs80359165 - test get chr synonym'
 );
 
 ok($coll->vcf_collection_close, 'close VCF collection filehandle after ESP annotation');

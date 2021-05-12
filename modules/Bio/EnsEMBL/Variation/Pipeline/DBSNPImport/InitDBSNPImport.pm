@@ -1,6 +1,6 @@
 =head1 LICENSE
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -76,6 +76,12 @@ sub run {
   }
   # set up the list of sub_dir
   $self->param('sub_dirs', [ map { {sub_dir => $_} } @sub_dirs]);
+
+  # Check the assembly is valid
+  my $assembly = $self->param_required('assembly');
+  if ($assembly !~ /^(GRCh37|GRCh38)/) {
+      die("Assembly ($assembly) is invalid. Please specify GRCh37 or GRCh38");
+  }
 }
 
 sub write_output {

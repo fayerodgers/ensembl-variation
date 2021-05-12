@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ use warnings;
 use base ('Bio::EnsEMBL::Hive::PipeConfig::HiveGeneric_conf');
 
 use Bio::EnsEMBL::Hive::PipeConfig::HiveGeneric_conf;
-use Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::Constants qw(RGD AnimalQTL ZFIN GWAS OMIA EGA Orphanet MIMmorbid DDG2P CGC IMPC MGI NONE RNAi species);
+use Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::Constants qw(RGD ANIMALQTL ZFIN GWAS OMIA EGA ORPHANET MIMMORBID DDG2P CGC IMPC MGI NONE HUMAN MOUSE ANIMALSET RNAi);
 
 
 sub default_options {
@@ -104,7 +104,7 @@ sub default_options {
 
         run_import_type         =>  NONE,
 
-        threshold_qtl           =>  0, # default for RGD_qtl, AnimalQTL
+        threshold_qtl           =>  undef, # default for RGD_qtl, AnimalQTL
 
         ega_database_conf       => $self->o('pipeline_dir').'/ega_database.conf',
 
@@ -139,7 +139,7 @@ sub default_options {
             -port   => $self->o('hive_db_port'),
             -user   => $self->o('hive_db_user'),
             -pass   => $self->o('hive_db_password'),
-            -dbname => $ENV{'USER'}.'_'.$self->o('pipeline_name').'_'.$self->o('ensembl_release'),
+            -dbname => $ENV{'USER'}.'_ehive_'.$self->o('pipeline_name').'_'.$self->o('ensembl_release'),
             -driver => 'mysql',
         },
     };
@@ -164,6 +164,7 @@ sub pipeline_analyses {
         ensembl_registry    => $self->o('reg_file'),
         pipeline_dir        => $self->o('pipeline_dir'),
         debug_mode          => $self->o('debug_mode'),
+        run_type            => $self->o('run_import_type')
     );
 
     return [
@@ -174,38 +175,310 @@ sub pipeline_analyses {
                 @common_params,
             },
             -input_ids  => [{}],
-            -rc_name    => 'long',
+            -rc_name    => 'default',
             -max_retry_count => 0,
             -flow_into  => {
-                '2->A' => [ 'import_rgd' ],
-                '3->A' => [ 'import_animalqtldb' ],
-                '4->A' => [ 'import_zfin' ],
-                '5->A' => [ 'import_gwas' ],
-                '6->A' => [ 'import_omia' ],
-                '7->A' => [ 'import_ega' ],
-                '8->A' => [ 'import_orphanet' ],
-                '9->A' => [ 'import_mimmorbid' ],
-                '10->A'=> [ 'import_ddg2p' ],
-                '11->A'=> [ 'import_cancerGC' ],
-                '12->A'=> [ 'import_mouse' ],
+                '2->A' => [ 'import_human' ],
+                '3->A' => [ 'import_mouse' ],
+                '4->A' => [ 'import_animalset' ],
+                '5->A' => [ 'import_rgd' ],
+                '6->A' => [ 'import_zfin' ],
 		'13->A'=> ['import_rnai'],
                 'A->1' => [ 'finish_pipeline' ],
             },
         },
 
-        {   -logic_name => 'import_rgd',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportRGD',
+
+        # HUMAN import:
+        {   -logic_name => 'import_human',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportHuman',
             -parameters => {
-                threshold_qtl   => $self->o('threshold_qtl'),
                 @common_params,
             },
             -input_ids      => [],
             -hive_capacity  => 1,
             -rc_name    => 'default',
             -flow_into  => {
-                1 => [ 'check_phenotypes']
+                '2->A' => [ 'import_gwas' ],
+                '3->A' => [ 'import_ega' ],
+                '4->A' => [ 'import_orphanet' ],
+                '5->A' => [ 'import_mimmorbid' ],
+                '6->A' => [ 'import_ddg2p' ],
+                '7->A' => [ 'import_cancerGC' ],
+                'A->1' => [ 'check_phenotypes'],
             },
-            -failed_job_tolerance => 1, # tries 1 times to run a job
+        },
+
+        {   -logic_name => 'import_gwas',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportGWAS',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_gwas']
+            },
+        },
+
+        {   -logic_name => 'check_gwas',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_ega']
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_ega',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportEGA',
+            -parameters => {
+                ega_database_conf => $self->o('ega_database_conf'),
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_ega']
+            },
+        },
+
+        {   -logic_name => 'check_ega',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_orphanet']
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_orphanet',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportOrphanet',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_orphanet']
+            },
+        },
+
+        {   -logic_name => 'check_orphanet',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_mimmorbid']
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_mimmorbid',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMIMmorbid',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_mimmorbid']
+            },
+        },
+
+        {   -logic_name => 'check_mimmorbid',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_ddg2p']
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_ddg2p',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportDDG2P',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_ddg2p']
+            },
+        },
+
+        {   -logic_name => 'check_ddg2p',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_cancerGC']
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_cancerGC',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportCGC',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_cancerGC']
+            },
+        },
+
+        {   -logic_name => 'check_cancerGC',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -max_retry_count => 0,
+        },
+
+
+        # Mouse import:
+        {   -logic_name => 'import_mouse',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMouse',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                '2->A' => [ 'import_impc'],
+                '3->A' => [ 'import_mgi'],
+                'A->1' => [ 'check_phenotypes'],
+            },
+        },
+
+        {   -logic_name => 'import_impc',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportIMPC',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => { 'check_impc' => INPUT_PLUS() },
+            },
+        },
+
+        {   -logic_name => 'check_impc',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 =>  { 'import_mgi' => INPUT_PLUS() },
+            },
+            -max_retry_count => 0,
+        },
+
+        {   -logic_name => 'import_mgi',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMGI',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_mgi'],
+            },
+        },
+
+        {   -logic_name => 'check_mgi',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -max_retry_count => 0,
+        },
+
+
+        # AnimalSet import:
+        {   -logic_name => 'import_animalset',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportAnimalSet',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                '2' => [ 'import_omia' ],
+                '3' => [ 'import_animalqtldb' ],
+            },
+        },
+
+        {   -logic_name => 'import_omia',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportOMIA',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_omia']
+            },
+        },
+
+        {   -logic_name => 'check_omia',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                2 => [ 'import_animalqtldb'],
+                3 => [ 'check_phenotypes'],
+            },
+            -max_retry_count => 0,
         },
 
         {   -logic_name => 'import_animalqtldb',
@@ -218,9 +491,38 @@ sub pipeline_analyses {
             -hive_capacity  => 1,
             -rc_name    => 'default',
             -flow_into  => {
-                2 => [ 'check_phenotypes']
+                1 => [ 'check_animalqtl']
             },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
+        },
+
+        {   -logic_name => 'check_animalqtl',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::CheckPhenotypeAnnotation',
+            -parameters => {
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into => {
+                1 => [ 'check_phenotypes']
+            },
+            -max_retry_count => 0,
+        },
+
+
+        #Other species:
+        {   -logic_name => 'import_rgd',
+            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportRGD',
+            -parameters => {
+                threshold_qtl   => $self->o('threshold_qtl'),
+                @common_params,
+            },
+            -input_ids      => [],
+            -hive_capacity  => 1,
+            -rc_name    => 'default',
+            -flow_into  => {
+                1 => [ 'check_phenotypes']
+            },
         },
 
         {   -logic_name => 'import_zfin',
@@ -234,149 +536,6 @@ sub pipeline_analyses {
             -flow_into  => {
                 1 => [ 'check_phenotypes']
             },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_gwas',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportGWAS',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_omia',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportOMIA',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_ega',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportEGA',
-            -parameters => {
-                ega_database_conf => $self->o('ega_database_conf'),
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_orphanet',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportOrphanet',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_mimmorbid',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMIMmorbid',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_ddg2p',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportDDG2P',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_cancerGC',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportCGC',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_mouse',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMouse',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                2 => [ 'import_impc'],
-                3 => [ 'import_mgi']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_impc',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportIMPC',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
-        },
-
-        {   -logic_name => 'import_mgi',
-            -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportMGI',
-            -parameters => {
-                @common_params,
-            },
-            -input_ids      => [],
-            -hive_capacity  => 1,
-            -rc_name    => 'default',
-            -flow_into  => {
-                1 => [ 'check_phenotypes']
-            },
-            -failed_job_tolerance => 5, # tries 5 times to run a job
         },
         {   -logic_name => 'import_rnai',
             -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::ImportRNAi',
@@ -401,12 +560,12 @@ sub pipeline_analyses {
             -hive_capacity  => 1,
             -rc_name    => 'default',
             -flow_into  => {
-                2 => [ 'ontology_mapping'],
+                2 => [ 'import_ontology_mapping'],
                 3 => [ 'finish_phenotype_annotation']
             },
         },
 
-        {   -logic_name => 'ontology_mapping',
+        {   -logic_name => 'import_ontology_mapping',
             -module     => 'Bio::EnsEMBL::Variation::Pipeline::PhenotypeAnnotation::OntologyMapping',
             -parameters => {
                 @common_params,

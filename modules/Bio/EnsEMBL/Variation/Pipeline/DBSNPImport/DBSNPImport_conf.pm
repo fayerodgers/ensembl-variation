@@ -1,6 +1,6 @@
 =head1 LICENSE
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -56,10 +56,12 @@ sub default_options {
 
     pipeline_name           => 'dbsnp_import',
     species                 => 'homo_sapiens',
+    assembly                => $self->o('assembly'),
     pipeline_dir            => $self->o('pipeline_dir'),
     data_dir                => $self->o('pipeline_dir') . '/split-src',
     rpt_dir                 => $self->o('pipeline_dir') . '/split-rpt',
     script_dir              => $self->o('ensembl_cvs_root_dir') . '/ensembl-variation/scripts/import/dbSNP_v2',
+    ancestral_fasta_file    => $self->o('ancestral_fasta_file'),
     fasta_file              => $self->o('fasta_file'),
     registry_file           => $self->o('pipeline_dir') . '/' . 'ensembl.registry',
 
@@ -78,16 +80,18 @@ sub pipeline_wide_parameters {
   my ($self) = @_;
   return {
     %{$self->SUPER::pipeline_wide_parameters},          # here we inherit anything from the base class
-    debug            => $self->o('debug'),
+    debug                => $self->o('debug'),
     
-    pipeline_dir     => $self->o('pipeline_dir'),
-    ensembl_registry => $self->o('registry_file'),
-    species          => $self->o('species'),
+    pipeline_dir         => $self->o('pipeline_dir'),
+    ensembl_registry     => $self->o('registry_file'),
+    species              => $self->o('species'),
+    assembly             => $self->o('assembly'),
     
-    data_dir         => $self->o('data_dir'),
-    rpt_dir          => $self->o('rpt_dir'),
-    fasta_file       => $self->o('fasta_file'),
-    script_dir       => $self->o('script_dir'),
+    data_dir             => $self->o('data_dir'),
+    rpt_dir              => $self->o('rpt_dir'),
+    ancestral_fasta_file => $self->o('ancestral_fasta_file'),
+    fasta_file           => $self->o('fasta_file'),
+    script_dir           => $self->o('script_dir'),
   };
 }
 

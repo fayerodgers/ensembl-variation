@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ sub default_options {
 
         # include RefSeq transcripts, and edit with accompanying BAM?
         include_refseq          => 0,
-        bam                     => '/nfs/production/panda/ensembl/variation/data/dump_vep/interim_GRCh38.p12_knownrefseq_alignments_2019-01-25.bam',
+        bam                     => '/nfs/production/panda/ensembl/variation/data/dump_vep/GCF_000001405.39_GRCh38.p13_knownrefseq_alns.bam',
 
         # GRCh37 bam
         # bam                     => '/nfs/production/panda/ensembl/variation/data/dump_vep/interim_GRCh37.p13_knownrefseq_alignments_2017-01-13.bam',        

@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2019] EMBL-European Bioinformatics Institute
+# Copyright [2016-2020] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use Pod::Usage qw(pod2usage);
 use Bio::EnsEMBL::Variation::Utils::QCUtils qw(count_rows get_evidence_attribs check_illegal_characters check_for_ambiguous_alleles remove_ambiguous_alleles);
 use Bio::EnsEMBL::Registry;
 use Bio::DB::HTS::Faidx;
+use Bio::EnsEMBL::Variation::Utils::AncestralAllelesUtils;
 use Bio::EnsEMBL::Variation::Utils::Sequence qw(SO_variation_class);
 use Bio::EnsEMBL::Variation::Utils::Constants qw(:SO_class_terms);
 use Bio::EnsEMBL::Utils::Sequence qw(reverse_comp);
@@ -67,6 +68,19 @@ if ($config->{'ref_check'}) {
 } else {
   print "ref checking not done\n";
 }
+
+my $ancestral_fai_index;
+my $ancestral_alleles_utils;
+if ($config->{'assign_ancestral_allele'}) {
+  print "ancestral allele assignment done\n";
+  $ancestral_fai_index = Bio::DB::HTS::Faidx->new($config->{'ancestral_fasta_file'});
+  $ancestral_alleles_utils = Bio::EnsEMBL::Variation::Utils::AncestralAllelesUtils->new(-fasta_db => $ancestral_fai_index);
+  print "ancestral_fai_index done\n";
+  die("Unable to get ancestral FASTA index") if (!$ancestral_fai_index);
+} else {
+  print "ancestral allele assignment not done\n";
+}
+
 my $seq_regions_names = get_seq_region_names($dbh_var);
 my $nc_regions = get_nc_regions($dbh_var);
 my $nw_regions = get_nw_regions($dbh_var);
@@ -77,10 +91,14 @@ my $lu_info = get_lu_info($dbh_var);
 # Parsing the data file
 my ($num_lines) = parse_dbSNP_file($config);
 
-# Close open filehandles
-for my $ma_type ('update', 'log') {
-  my $fh = $config->{join('-', 'ma', $ma_type, 'fh')};
-  $fh->close();
+# Close open filehandles used for tracking the
+# update of any minor allele changes that are only done for
+# GRCh38 imports.
+if ($config->{'assembly'} eq 'GRCh38') {
+  for my $ma_type ('update', 'log') {
+    my $fh = $config->{join('-', 'ma', $ma_type, 'fh')};
+    $fh->close();
+  }
 }
 
 report_summary($config, $num_lines);
@@ -115,19 +133,29 @@ sub init_reports {
     die("$config->{'error_file'} already exists. Please rename or delete\n");
   }
 
-  # Files for updates and logs of 1000Genomes minor allele flipping
-  for my $ma_type ('update', 'log') {
-    my $filename = join('-', $base_filename, 'ma', $ma_type) . '.txt';
-    if (-e "$rpt_dir/$filename") {
+  # For GRCh37 the 1000Genomes minor allele is on the forward strand
+  # Some regions between GRCh37 and GRCh38 have been reverse complimented
+  # causing miss-matches with the minor allele.
+  # Variants with different strand mappings between GRCh37 and GRCh38
+  # are identified and the minor allele is reverse complimented.
+  # Files for updates and logs for minor allele mismatches.
+  if ($config->{'assembly'} eq 'GRCh38') {
+    print "Flip 1000Genomes minor alleles for strand differences between assembly $config->{'assembly'} and GRCh37\n";
+    for my $ma_type ('update', 'log') {
+      my $filename = join('-', $base_filename, 'ma', $ma_type) . '.txt';
+      if (-e "$rpt_dir/$filename") {
         die("$rpt_dir/$filename already exists. Please rename or delete\n");
+      }
+      my $fh = FileHandle->new("$rpt_dir/$filename", 'w');
+      if (! $fh) {
+        die("Unable to open $rpt_dir/$filename");
+      } else {
+        print "minor allele $ma_type file = $rpt_dir/$filename\n";
+        $config->{join('-', 'ma', $ma_type, 'fh')} = $fh;
+      }
     }
-    my $fh = FileHandle->new("$rpt_dir/$filename", 'w');
-    if (! $fh) {
-      die("Unable to open $rpt_dir/$filename");
-    } else {
-      print "minor allele $ma_type file = $rpt_dir/$filename\n";
-      $config->{join('-', 'ma', $ma_type, 'fh')} = $fh;
-    }
+  } else {
+    print "No flip of 1000Genomes minor alleles for assembly $config->{'assembly'}\n";
   }
 }
 
@@ -241,12 +269,15 @@ sub parse_refsnp {
   # 1000Genomes data
   $data->{'1000Genomes'} = get_study_frequency($rs_json, '1000Genomes');
 
-  # If the 1000Genomes data has a minor_allele, check if
-  # a flip is needed. This assumes that the assembly is GRCh38
-  # TODO - add an assembly check
-  #      - add a flag if flipping should be done
-  if (defined $data->{'1000Genomes'} &&
-      $data->{'1000Genomes'}->{'minor_allele'}) {
+  # If: 
+  # - the assembly is GRCh38
+  # - the 1000Genomes data has a minor_allele
+  # check if a flip is needed. 
+  # TODO - add a flag if flipping should be done if for GRCh38
+  #        no flip is needed
+  if (($config->{'assembly'} eq 'GRCh38') &&
+       defined $data->{'1000Genomes'} &&
+       $data->{'1000Genomes'}->{'minor_allele'}) {
     my $align_diff = get_align_diff($rs_json);
     if ($align_diff) {
       my $old_minor_allele = $data->{'1000Genomes'}->{'minor_allele'};
@@ -267,6 +298,9 @@ sub parse_refsnp {
     }
   }
 
+  if ($config->{assign_ancestral_allele}) {
+    assign_ancestral_alleles($data->{'vfs'}, $ancestral_alleles_utils);
+  }
 
   # To the QC now
   # Check for the allele string matches
@@ -274,6 +308,19 @@ sub parse_refsnp {
   # Set the variant class
   return $data; 
 
+}
+
+# Assigns ancestral allele for each variation feature
+# Input:
+# vfs              - variation features for the variant
+sub assign_ancestral_alleles {
+  my ($vfs, $ancestral_alleles_utils) = @_;
+  
+  for my $vf (@$vfs) { 
+    my $seq_name = $seq_regions_names->{$vf->{'seq_region_id'}};
+    my $ancestral_allele = $ancestral_alleles_utils->assign($seq_name, $vf->{'seq_region_start'}, $vf->{'seq_region_end'});
+    $vf->{'ancestral_allele'} = $ancestral_allele;
+  }
 }
 
 # Flips a minor allele if there are differences in GRCh37 and GRCh38 alignment
@@ -629,7 +676,9 @@ sub qc_refsnp {
   my ($config, $lu_info, $rs_data, $fai_index) = @_;
   $rs_data->{'evidence_attribs'} = get_evidence($lu_info, $rs_data); 
   $rs_data->{'map_weight'} = get_map_weight($ref_regions, $rs_data) if ($add_map_weight);
-  $rs_data->{'num_par'} = get_vf_par($rs_data);
+  $rs_data->{'num_par'} = get_vf_par($rs_data, $config->{'assembly'},
+                                     $lu_info->{'chrY_seq_region_id'});
+
   # Warn if map_weight = num_par
   if ($rs_data->{'num_par'} && $rs_data->{'num_par'} == $rs_data->{'map_weight'}) {
       my $info = join(";",
@@ -744,23 +793,39 @@ sub get_map_weight {
 }
 
 sub get_vf_par {
-  my ($rs_data) = @_;
+  my ($rs_data, $assembly, $Y_seq_region_id) = @_;
+
   my $num_par = 0;
+
+  my ($Y_PAR1_seq_region_start, $Y_PAR1_seq_region_end);
+  my ($Y_PAR2_seq_region_start, $Y_PAR2_seq_region_end);
+
+  if ($assembly eq 'GRCh38') {
+    $Y_PAR1_seq_region_start = 10001 ;
+    $Y_PAR1_seq_region_end = 2781479;
+    $Y_PAR2_seq_region_start = 56887903;
+    $Y_PAR2_seq_region_end = 57217415;
+  } elsif ($assembly eq 'GRCh37') {
+    $Y_PAR1_seq_region_start = 10001;
+    $Y_PAR1_seq_region_end = 2649520;
+    $Y_PAR2_seq_region_start = 59034050;
+    $Y_PAR2_seq_region_end = 59363566;
+  }
 
   # Loop the vfs and count the regions that are PAR
   for my $vf (@{$rs_data->{'vfs'}}) {
     $vf->{'par'} = 0;
-    if ($vf->{'seq_region_id'} == 131553) {
-      if ($vf->{'seq_region_start'} >= 10001
-          && $vf->{'seq_region_end'}   <= 2781479
-          && $vf->{'seq_region_start'} <= 2781479
-          && $vf->{'seq_region_end'} >= 10001) {
+    if ($vf->{'seq_region_id'} == $Y_seq_region_id) {
+      if ($vf->{'seq_region_start'} >= $Y_PAR1_seq_region_start
+          && $vf->{'seq_region_end'}   <= $Y_PAR1_seq_region_end
+          && $vf->{'seq_region_start'} <= $Y_PAR1_seq_region_end
+          && $vf->{'seq_region_end'} >= $Y_PAR1_seq_region_start) {
         $num_par++;
         $vf->{'par'} = 1;
-      } elsif ($vf->{'seq_region_start'} >= 56887903
-          && $vf->{'seq_region_end'} <=   57217415 
-          && $vf->{'seq_region_start'} <= 57217415 
-          && $vf->{'seq_region_end'} >= 56887903) {
+      } elsif ($vf->{'seq_region_start'} >= $Y_PAR2_seq_region_start
+          && $vf->{'seq_region_end'} <=   $Y_PAR2_seq_region_end
+          && $vf->{'seq_region_start'} <= $Y_PAR2_seq_region_end
+          && $vf->{'seq_region_end'} >= $Y_PAR2_seq_region_start) {
         $num_par++;
         $vf->{'par'} = 1;
       } 
@@ -1128,7 +1193,7 @@ sub import_variation_feature {
                            (variation_name, map_weight, 
                             seq_region_id, seq_region_start, seq_region_end,
                             seq_region_strand, 
-                            variation_id, allele_string,
+                            variation_id, allele_string, ancestral_allele,
                             source_id, variation_set_id, class_attrib_id,
                             minor_allele, minor_allele_freq, minor_allele_count,
                             evidence_attribs, display
@@ -1137,7 +1202,7 @@ sub import_variation_feature {
                             ?, ?,
                             ?, ?, ?,
                             ?,
-                            ?, ?,
+                            ?, ?, ?,
                             ?, ?, ?,
                             ?, ?, ?,
                             ?, ?)]);
@@ -1176,7 +1241,7 @@ sub import_variation_feature {
     $sth->execute($vf->{'variation_name'}, $map_weight,
                   $vf->{'seq_region_id'}, $vf->{'seq_region_start'}, $vf->{'seq_region_end'},
                   $vf->{'seq_region_strand'},
-                  $variation_id, $vf->{'allele_string'},
+                  $variation_id, $vf->{'allele_string'}, $vf->{'ancestral_allele'},
                   $source_id, $sets, $vf->{'class_attrib_id'},
                   $minor_allele, $maf, $minor_allele_count,
                   $evidence_attribs_str, $data->{'display'});
@@ -1557,6 +1622,20 @@ sub get_seq_region_names {
   return (\%seq_region);
 }
 
+# For a given chr look up the seq_region
+# This is currently only used to look up seq_region for Y for
+# processing of PAR.
+# It assumes that there is only one.
+# This should be checked at the start of script.
+sub get_seq_region_chr {
+  my ($dbh, $chr) = @_;
+  my $sth = $dbh->prepare(qq{SELECT seq_region_id FROM seq_region WHERE name = ?});
+  $sth->execute($chr) || die "Error getting seq_region_id for chr $chr";
+  my ($seq_region_id) = $sth->fetchrow_array();
+  $sth->finish();
+  return $seq_region_id;
+}
+
 # Get command line options
 # Get information for run
 sub configure {
@@ -1574,12 +1653,14 @@ sub configure {
     'input_file|i=s',
     'rpt_dir=s',
     'fasta_file=s',
+    'ancestral_fasta_file=s',
 
     'species=s',
     'registry|r=s',
-    
+    'assembly|a=s',
     'no_db_load',
-    'no_ref_check'
+    'no_ref_check',
+    'no_assign_ancestral_allele'
     ) or pod2usage(2);
  
   # Print usage message if help requested or no args
@@ -1599,7 +1680,7 @@ sub configure {
   # Set defaults
   $config->{'species'} ||= 'homo_sapiens';
   $config->{'debug'} ||= 0;
-
+  $config->{'assembly'} ||= 'GRCh38';
   $config->{'db_load'} = 1;
   if (exists $config->{'no_db_load'}) {
     $config->{'db_load'} = 0;
@@ -1609,6 +1690,11 @@ sub configure {
   if (exists $config->{'no_ref_check'}) {
     $config->{'ref_check'} = 0;
   } 
+
+  $config->{'assign_ancestral_allele'} = 1;
+  if (exists $config->{'no_assign_ancestral_allele'}) {
+    $config->{'assign_ancestral_allele'} = 0;
+  }
 
   # Check parameters
   if (! -e $config->{'input_file'}) {
@@ -1622,6 +1708,11 @@ sub configure {
   if (! -d $config->{'rpt_dir'}) {
     die("ERROR: Report directory does not exist ($config->{'rpt_dir'})\n");
   }
+
+  if ($config->{'assembly'} !~ /^(GRCh38|GRCh37)$/) {
+      die("ERROR: Assembly is invalid ($config->{'assembly'}). Please specify GRCh38 or GRCh37");
+  }
+
   if ($config->{'ref_check'}) {
     if (! defined $config->{'fasta_file'}) {
       pod2usage({ -message => "Mandatory argument (fasta_file) is missing", 
@@ -1630,6 +1721,17 @@ sub configure {
                );
     } elsif (! -e $config->{'fasta_file'}) {
       die("ERROR: FASTA file does not exist ($config->{'fasta_file'})\n");
+    }
+  }
+
+  if ($config->{'assign_ancestral_allele'}) {
+    if (! defined $config->{'ancestral_fasta_file'}) {
+      pod2usage({ -message => "Mandatory argument (ancestral_fasta_file) is missing", 
+                  -exitval => 2,
+                }
+               );
+    } elsif (! -e $config->{'ancestral_fasta_file'}) {
+      die("ERROR: Ancestral FASTA file does not exist ($config->{'ancestral_fasta_file'})\n");
     }
   }
   return $config;  
@@ -1770,7 +1872,8 @@ sub get_lu_info {
   my %lu_info;
 
   $lu_info{'evidence_ids'} = get_evidence_attribs($dbh);
-  $lu_info{'failed_set_id'} = find_failed_variation_set_id($dbh);  
+  $lu_info{'failed_set_id'} = find_failed_variation_set_id($dbh);
+  $lu_info{'chrY_seq_region_id'} = get_seq_region_chr($dbh, 'Y');
   return \%lu_info;
 }
 
@@ -2097,6 +2200,14 @@ JSON file provided by dbSNP
 
 Directory to store summary report and error logs
 
+=item B<--assembly ASSEMBLY>
+
+Specify assembly to use. GRCh38 (default) or GRCh37
+
+=item B<--ancestral_fasta_file FILE>
+
+Path to FASTA file containing ancestral sequence
+
 =item B<--fasta_file FILE>
 
 Path to FASTA file containing reference sequence
@@ -2116,6 +2227,10 @@ No database load. Only parses the file. Used for testing.
 =item B<--no_ref_check>
 
 No reference checking
+
+=item B<--no_assign_ancestral_allele>
+
+No ancestral allele assignment
 
 =item B<--debug>
 

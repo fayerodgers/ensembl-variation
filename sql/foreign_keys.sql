@@ -1,5 +1,5 @@
 -- Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
--- Copyright [2016-2019] EMBL-European Bioinformatics Institute
+-- Copyright [2016-2020] EMBL-European Bioinformatics Institute
 -- 
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -126,6 +126,8 @@ ALTER TABLE regulatory_feature_variation ADD FOREIGN KEY (variation_feature_id) 
 
 ALTER TABLE variation ADD FOREIGN KEY (source_id) REFERENCES source(source_id);
 ALTER TABLE variation ADD FOREIGN KEY (class_attrib_id) REFERENCES attrib(attrib_id);
+
+ALTER TABLE phenotype ADD FOREIGN KEY (class_attrib_id) REFERENCES attrib(attrib_id);
 
 ALTER TABLE phenotype_feature ADD FOREIGN KEY (source_id) REFERENCES source(source_id);
 ALTER TABLE phenotype_feature ADD FOREIGN KEY (study_id) REFERENCES study(study_id);

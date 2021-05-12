@@ -1,7 +1,7 @@
 =head1 LICENSE
 
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@ use DBI qw(:sql_types);
 use String::Approx qw(amatch adist);
 use Algorithm::Diff qw(diff);
 
+use Bio::EnsEMBL::Variation::Utils::SpecialChar qw(replace_char);
+
 use base ('Bio::EnsEMBL::Variation::Pipeline::BaseVariationProcess');
 
 
@@ -72,25 +74,7 @@ sub new {
     "skip_sets"     => 1,
   }, $class;
   $self->{pubmed_prefix} = "PMID:";
-  my %special_characters = (
-    'Å' => 'A',
-    'Ä' => 'A',
-    'Ö' => 'O',
-    'Ü' => 'U',
-    'ö' => 'o',
-    'ü' => 'u',
-    'ä' => 'a',
-    'í' => 'i',
-    'é' => 'e',
-    'è' => 'e',
-    'ë' => 'e',
-    'ç' => 'c',
-    '<' => ' less than ',
-    '>' => ' more than ',
-    'Đ' => 'D',
-    '&' => 'and',
-  );
-  $self->{special_characters} = \%special_characters;
+  $self->{gwas} = 0; #flag for GWAS specific behaviour
 
   return $self;
 }
@@ -130,19 +114,6 @@ sub skip_synonyms {
   return $self->{skip_synonyms};
 }
 
-=head2 get_special_characters
-
-  Example    : $special_chars = $obj->get_special_characters()
-  Description: Get the $special_chars hashref
-  Returntype : hashref
-  Exceptions : none
-
-=cut
-
-sub get_special_characters {
-  my $self = shift;
-  return $self->{special_characters};
-}
 
 =head2 get_pubmed_prefix
 
@@ -160,45 +131,43 @@ sub get_pubmed_prefix {
 
 =head2 core_db_adaptor
 
-  Arg [1]    : Bio::EnsEMBL::DBSQL::DBAdaptor $db_adaptor (optional)
-               The new core_db_adaptor
   Example    : $core_dba = $obj->core_db_adaptor()
-  Description: Get/set the core_db_adaptor
+  Description: Get the core_db_adaptor
   Returntype : Bio::EnsEMBL::DBSQL::DBAdaptor
   Exceptions : none
 
 =cut
 
 sub core_db_adaptor {
-  my ($self, $db_adaptor) = @_;
-  $self->{core_dba} = $db_adaptor if defined $db_adaptor;
+  my $self = shift;
+
+  $self->{core_dba} = $self->get_species_adaptor("core") if !defined $self->{core_dba};
+
   return $self->{core_dba};
 }
 
 =head2 variation_db_adaptor
 
-  Arg [1]    : Bio::EnsEMBL::DBSQL::DBAdaptor $db_adaptor (optional)
-               The new core_db_adaptor
   Example    : $variation_dba = $obj->variation_db_adaptor()
-  Description: Get/set the variation_db_adaptor
+  Description: Get the variation_db_adaptor
   Returntype : Bio::EnsEMBL::DBSQL::DBAdaptor
   Exceptions : none
 
 =cut
 
 sub variation_db_adaptor {
-  my ($self, $db_adaptor) = @_;
-  $self->{variation_dba} = $db_adaptor if defined $db_adaptor;
+  my $self = shift;
+
+  $self->{variation_dba} =  $self->get_species_adaptor("variation") if !defined $self->{variation_dba};
+
   return $self->{variation_dba};
 }
 
 
 =head2 ontology_db_adaptor
 
-  Arg [1]    : Bio::EnsEMBL::DBSQL::DBAdaptor $db_adaptor (optional)
-               The new ontology_db_adaptor
   Example    : $ontology_dba = $obj->ontology_db_adaptor()
-  Description: Get/set the ontology_db_adaptor
+  Description: Get the ontology_db_adaptor
   Returntype : Bio::EnsEMBL::DBSQL::DBAdaptor
   Exceptions : none
 
@@ -206,7 +175,9 @@ sub variation_db_adaptor {
 
 sub ontology_db_adaptor {
   my ($self, $db_adaptor) = @_;
-  $self->{ontology_dba} = $db_adaptor if defined $db_adaptor;
+
+  $self->{ontology_dba} =  $self->get_adaptor('multi', 'ontology') if !defined $self->{ontology_dba};
+
   return $self->{ontology_dba};
 }
 
@@ -245,6 +216,25 @@ sub skip_sets {
   $self->{skip_sets} = $skip_set if defined $skip_set;
   return $self->{skip_sets};
 }
+
+
+=head2 gwas
+
+Arg [1]    : boolean $gwas (optional)
+             The gwas specific behaviour flag
+Example    : $gwas_flag = $obj->gwas()
+Description: Get/set gwas flag
+Returntype : boolean
+Exceptions : none
+
+=cut
+
+sub gwas {
+  my ($self, $gwas) = @_;
+  $self->{gwas} = $gwas if defined $gwas;
+  return $self->{gwas};
+}
+
 
 
 =head2 logFH
@@ -386,6 +376,8 @@ sub print_pipelogFH {
 sub get_seq_region_ids {
   my $self = shift;
 
+  return $self->{seq_region_ids} if (defined $self->{seq_region_ids});
+
   my $sth = $self->variation_db_adaptor->dbc->prepare(qq{
     SELECT seq_region_id, name
     FROM seq_region
@@ -397,7 +389,8 @@ sub get_seq_region_ids {
   $seq_region_ids{$name} = $id while $sth->fetch();
   $sth->finish;
 
-  return \%seq_region_ids;
+  $self->{seq_region_ids} = \%seq_region_ids;
+  return $self->{seq_region_ids};
 }
 
 
@@ -432,15 +425,17 @@ sub get_or_add_source {
   $sth->fetch();
 
   if (!defined($source_id)) {
+    my $data_types = defined($source_info->{data_types}) ? $source_info->{data_types} : "";
     $stmt = qq{
       INSERT INTO
-        source (name, description, url, somatic_status, version )
+        source (name, description, url, somatic_status, version, data_types )
       VALUES (
         '$source_info->{source_name}',
         '$source_info->{source_description}',
         '$source_info->{source_url}',
         '$source_info->{source_status}',
-        $source_info->{source_version}
+        $source_info->{source_version},
+        '$data_types'
       )
     };
     $db_adaptor->dbc->do($stmt);
@@ -455,7 +450,8 @@ sub get_or_add_source {
       SET name=?,
         description=?,
         url=?,
-        version=?
+        version=?,
+        data_types=?
       WHERE
         source_id=?
     };
@@ -464,6 +460,7 @@ sub get_or_add_source {
                                 $source_info->{source_description},
                                 $source_info->{source_url},
                                 $source_info->{source_version},
+                                $source_info->{data_types},
                                 $source_id);
   }
 
@@ -485,7 +482,6 @@ sub get_or_add_source {
 sub save_phenotypes {
   my ($self, $source_info, $input_data) = @_;
 
-  my $core_dba = $self->core_db_adaptor;
   my $phenotype_dba =  $self->variation_db_adaptor->get_PhenotypeAdaptor;
 
   my $set = defined($source_info->{set}) ? $source_info->{set} : undef;
@@ -591,8 +587,8 @@ sub save_phenotypes {
   Example    : $self->dump_phenotypes($source_id, 1);
   Description: Dump the existing phenotype_features, phenotype_features_attribs
                for the particular source and removes them if clean option selected.
-               $clean option removes the phenotype feature data including phenotypes
-               and phenotype_ontology_accessions that is not attached to any phenotype_feature.
+               $clean option removes the phenotype feature data excluding phenotypes
+               and phenotype_ontology_accessions (these might get added again by the import).
   Returntype : none
   Exceptions : none
 
@@ -638,19 +634,9 @@ sub dump_phenotypes {
     FROM phenotype p LEFT JOIN phenotype_feature pf ON pf.phenotype_id = p.phenotype_id
     WHERE pf.phenotype_id IS null;
   };
-  my $p_extra_delete_stmt = qq{
-    DELETE p.*
-    FROM phenotype p LEFT JOIN phenotype_feature pf ON pf.phenotype_id = p.phenotype_id
-    WHERE pf.phenotype_id IS null;
-  };
 
   my $poa_extra_select_stmt = qq{
     SELECT *
-    FROM phenotype_ontology_accession poa LEFT JOIN phenotype_feature pf ON pf.phenotype_id = poa.phenotype_id
-    WHERE pf.phenotype_id IS null;
-  };
-  my $poa_extra_delete_stmt = qq{
-    DELETE poa.*
     FROM phenotype_ontology_accession poa LEFT JOIN phenotype_feature pf ON pf.phenotype_id = poa.phenotype_id
     WHERE pf.phenotype_id IS null;
   };
@@ -669,11 +655,6 @@ sub dump_phenotypes {
     $sth = $db_adaptor->dbc->prepare($pf_delete_stmt);
     $sth->execute();
 
-    $sth = $db_adaptor->dbc->prepare($p_extra_delete_stmt);
-    $sth->execute();
-
-    $sth = $db_adaptor->dbc->prepare($poa_extra_delete_stmt);
-    $sth->execute();
   }
 }
 
@@ -699,7 +680,7 @@ sub _sql_to_file{
   my $sth = $db_adaptor->dbc->prepare($sql_stmt);
   $sth->execute();
 
-  open (my $fhDump, ">", $outFile) || die ("Failed to open file".$outFile.": $!\n");
+  open(my $fhDump, ">", $outFile) || die ("Failed to open file".$outFile.": $!\n");
   while (my $row = $sth->fetchrow_arrayref()) {
     for(@$row) { $_ = "NULL" if !defined $_; } #some values are undef e.g. study_id, this is expected
     print $fhDump join( "\t", map {qq($_)} @$row), "\n";
@@ -711,6 +692,7 @@ sub _sql_to_file{
 sub _add_phenotypes {
   my ($self, $data, $source_info) = @_;
 
+  my $core_dba      = $self->core_db_adaptor;
   my $db_adaptor    = $self->variation_db_adaptor;
 
   my $phenotypes    = $data->{phenotypes};
@@ -732,11 +714,31 @@ sub _add_phenotypes {
     )
   };
 
+  my $st_sel_sr_stmt = qq{
+    SELECT seq_region_id, name
+    FROM seq_region
+    WHERE seq_region_id = ?
+  };
+
+  my $st_ins_sr_stmt = qq{
+    INSERT INTO
+      seq_region (seq_region_id, name)
+    VALUES (
+      ?, ?
+    )
+  };
+
   my $extra_cond = '';
   my $left_join = '';
 
-  # add special joins for checking certain sources
-  if ($source_info->{source_name_short} =~ m/GWAS/i) {
+  #for gwas variants
+  my ($pheno_set, $gwas_set, $evidence_attrib) = ('','','');
+  if ($self->gwas) {
+    $pheno_set = $self->_get_set_ids("ph_variants");
+    $gwas_set = $self->_get_set_ids($source_info->{set});
+    $evidence_attrib = $self->_get_attrib_ids("evidence", "Phenotype_or_Disease");
+
+    # add special joins for checking certain sources
     $left_join = qq{
       LEFT JOIN
       (
@@ -815,12 +817,28 @@ sub _add_phenotypes {
     values (?,?,?,?)
    };
 
+  my $update_v_vf_stmt = qq {
+    UPDATE variation v, variation_feature vf
+    SET
+      v.display = 1,
+      v.evidence_attribs = CONCAT_WS(',',v.evidence_attribs, ',$evidence_attrib,'),
+      vf.display =1,
+      vf.evidence_attribs = CONCAT_WS(',',vf.evidence_attribs, ',$evidence_attrib,'),
+      vf.variation_set_id = CONCAT_WS(',',vf.variation_set_id, ',$pheno_set,$gwas_set,')
+    WHERE
+      v.variation_id  = vf.variation_id AND
+      vf.variation_feature_id = ?
+  };
+
   my $st_ins_sth   = $db_adaptor->dbc->prepare($st_ins_stmt);
   my $pf_check_sth = $db_adaptor->dbc->prepare($pf_check_stmt);
   my $pf_ins_sth   = $db_adaptor->dbc->prepare($pf_ins_stmt);
   my $attrib_ins_sth = $db_adaptor->dbc->prepare($attrib_ins_stmt);
   my $attrib_ins_cast_sth = $db_adaptor->dbc->prepare($attrib_ins_cast_stmt);
   my $ontology_accession_ins_sth = $db_adaptor->dbc->prepare($ontology_accession_ins_stmt);
+  my $v_vf_up_sth = $db_adaptor->dbc->prepare($update_v_vf_stmt);
+  my $sr_ins_sth    = $db_adaptor->dbc->prepare($st_ins_sr_stmt);
+  my $sr_sel_sth   = $core_dba->dbc->prepare($st_sel_sr_stmt);
 
   $self->{sql_statements}{st_ins_sth} = $st_ins_sth;
 
@@ -844,6 +862,10 @@ sub _add_phenotypes {
 
   my $total = scalar @sorted;
   my $i = 0;
+
+  # check gene seq region ID
+  my $seq_region_ids = $self->_get_seq_regions($db_adaptor);
+  my %missing_seq_regions;
 
   while (my $phenotype = shift(@sorted)) {
     $self->_progress($i++, $total);
@@ -886,7 +908,7 @@ sub _add_phenotypes {
     $pf_check_sth->bind_param(5,$study_id,SQL_INTEGER);
 
     # For nhgri-ebi gwas data
-    if ($source_info->{source_name_short} =~ m/GWAS/i) {
+    if ($self->gwas) {
       $pf_check_sth->bind_param(6,$phenotype->{"p_value"},SQL_VARCHAR);
     }
 
@@ -927,10 +949,39 @@ sub _add_phenotypes {
         $sth->bind_param(3,$attrib_type,SQL_VARCHAR);
         $sth->execute();
       }
+
+      if ($self->gwas) {
+        # update variation feature sets and dispaly flag
+        $v_vf_up_sth->bind_param(1,$coord->{vf_id},SQL_INTEGER);
+        $v_vf_up_sth->execute();
+      }
+
+      #check seq region id exists
+      if (! defined ($seq_region_ids->{$coord->{seq_region_id}}) ) {
+        $missing_seq_regions{$coord->{seq_region_id}} = 1;
+      }
+
+    }
+  }
+
+  foreach my $key (keys %missing_seq_regions){
+    $sr_sel_sth->bind_param(1,$key);
+    $sr_sel_sth->execute();
+    my $res = $sr_sel_sth->fetchrow_arrayref();
+
+    if ($res->[0] eq $key) {
+      $sr_ins_sth->bind_param(1, $key,SQL_INTEGER);
+      $sr_ins_sth->bind_param(2, $res->[1],SQL_VARCHAR);
+      $sr_ins_sth->execute();
+      $self->print_errFH("$key seq_region inserted in variation db\n") if ($self->{debug});
+    } else {
+      $self->print_errFH("$key seq_region missing in core and variation db!\n") if ($self->{debug});
     }
   }
 
   $self->_end_progress();
+  my $missingN = scalar keys(%missing_seq_regions);
+  $self->print_logFH("$missingN new seq_regions added\n") if ($self->{debug});
   $self->print_logFH( "$self->{study_count} new studies added\n") if ($self->{debug});
   $self->print_logFH( "$phenotype_feature_count new phenotype_features added\n") if ($self->{debug});
 
@@ -1042,16 +1093,34 @@ sub _add_set {
   $sth2->execute();
 }
 
+# fetch seq regions
+sub _get_seq_regions {
+  my ($self, $db_adaptor) = @_;
+
+  my $st_get_sr_stmt = qq{
+    SELECT seq_region_id, name
+    FROM seq_region
+  };
+  my $sr_get_sth = $db_adaptor->dbc->prepare($st_get_sr_stmt);
+  $sr_get_sth->execute();
+  my $result = $sr_get_sth->fetchall_hashref('seq_region_id');
+
+  return $result;
+}
+
+
 # fetch coordinates for variation, gene, or structural_variation
 sub _get_coords {
   my ($self, $ids, $variation_ids, $type, $db_adaptor) = @_;
 
   my $tables;
   my $where_clause;
+  my $id = '';
 
   my @object_ids = ($type eq 'Variation') ? map { $variation_ids->{$_}[1] } keys(%$variation_ids): @$ids;
 
   if($type eq 'Variation') {
+    $id = 'f.variation_feature_id,' if $self->gwas;
     $tables = 'variation_feature f, variation v';
     $where_clause = 'v.variation_id = f.variation_id AND v.name = ?';
   }
@@ -1066,7 +1135,7 @@ sub _get_coords {
 
   my $sth = $db_adaptor->dbc->prepare(qq{
     SELECT
-      f.seq_region_id, f.seq_region_start, f.seq_region_end, f.seq_region_strand
+      $id f.seq_region_id, f.seq_region_start, f.seq_region_end, f.seq_region_strand
     FROM
       $tables
     WHERE
@@ -1074,19 +1143,27 @@ sub _get_coords {
   });
 
   my $coords = {};
-  my ($sr_id, $start, $end, $strand);
+  my ($f_id, $sr_id, $start, $end, $strand);
 
   foreach my $id (@object_ids) {
     $sth->bind_param(1,$id,SQL_VARCHAR);
     $sth->execute();
-    $sth->bind_columns(\$sr_id, \$start, \$end, \$strand);
+    if ($self->gwas ){
+      $sth->bind_columns(\$f_id, \$sr_id, \$start, \$end, \$strand);
+    } else {
+      $sth->bind_columns(\$sr_id, \$start, \$end, \$strand);
+    }
 
-    push @{$coords->{$id}}, {
-      seq_region_id => $sr_id,
-      seq_region_start => $start,
-      seq_region_end => $end,
-      seq_region_strand => $strand
-    } while $sth->fetch();
+    while ( $sth->fetch) {
+      my %tmp = (
+        seq_region_id => $sr_id,
+        seq_region_start => $start,
+        seq_region_end => $end,
+        seq_region_strand => $strand
+      );
+      $tmp{vf_id} = $f_id if $self->gwas;
+      push @{$coords->{$id}}, \%tmp;
+    }
   }
 
   $sth->finish();
@@ -1167,12 +1244,46 @@ sub _get_attrib_types {
   return \@tmp_types;
 }
 
+# fetch attrib ids from db
+sub _get_attrib_ids {
+  my ($self, $type, $value) = @_;
+
+  my $aa = $self->variation_db_adaptor->get_AttributeAdaptor();
+  my $attrib_id = $aa->attrib_id_for_type_value($type, $value);
+
+  if (!$attrib_id){
+    die("Couldn't find the $value attrib\n");
+  } else {
+    return $attrib_id;
+  }
+
+}
+
+# fetch set ids from db
+sub _get_set_ids {
+  my $self = shift;
+  my $short_name = shift;
+
+  my $variation_set_ids = $self->variation_db_adaptor->dbc->db_handle->selectrow_arrayref(qq{
+    SELECT variation_set_id
+    FROM variation_set vs JOIN attrib a
+    ON vs.short_name_attrib_id = a.attrib_id
+    WHERE a.value = '$short_name'
+  });
+
+  if (!$variation_set_ids) {
+    die("Couldn't find the $short_name variation set\n");
+  } else {
+    return $variation_set_ids->[0];
+  }
+
+}
+
 # clean up + search for phenotype in db, if not found it gets inserted
 sub _get_phenotype_id {
   my ($self, $phenotype) = @_;
 
   my %phenotype_cache = %{$self->_phenotype_cache};
-  my %special_characters = %{$self->get_special_characters};
 
   my ($name, $description);
   $name = $phenotype->{name};
@@ -1184,10 +1295,7 @@ sub _get_phenotype_id {
   $description =~ s/[\(\)]//g; # Remove characters ( )
 
   # Replace special characters in the phenotype description
-  foreach my $char (keys(%special_characters)) {
-    my $new_char = $special_characters{$char};
-    $description =~ s/$char/$new_char/g;
-  }
+  $description = replace_char($description);
 
   # Check phenotype description in the format "description; name"
   if (!defined($name) || $name eq '') {
@@ -1429,5 +1537,130 @@ sub _iri2acc{
 
   return $acc;
 }
+
+
+# Methods for QC checks
+=head2 get_new_results
+
+  Arg [1]    : hashref $previous (optional)
+               The previous status counts of the analysis.
+  Example    : $new_counts = $obj->get_new_results()
+  Description: Run all the counting SQL on the new database.
+  Returntype : hashref of new counts
+  Exceptions : none
+
+=cut
+
+sub get_new_results {
+  my ($self, $previous) = @_; ## previous status only available if production db connection details supplied
+
+  my $dbc     = $self->variation_db_adaptor->dbc;
+  my $source = $self->param('source');
+
+  my %new;  ## hold some of the new counts to store
+
+  ## counts based on type and source
+  my $phenotype_feature_grouped_count_st = qq[select s.name, pf.type, count(*)
+                                          from phenotype_feature pf, source s
+                                          where pf.source_id = s.source_id
+                                          group by s.name, pf.type ];
+
+  ## counts on phenotypes relevant to all species
+  my @tables = ('phenotype', 'phenotype_feature', 'phenotype_feature_attrib', 'phenotype_ontology_accession');
+  foreach my $table (@tables) {
+    my $count_st = qq[ select count(*) from $table];
+    $new{"$table\_count"}  = _count_results($dbc, $count_st);
+    unless($new{"$table\_count"} > 0){  ## report & die if total failure
+        $self->print_logFH("WARNING: no entries found in $table table\n");
+    }
+  }
+
+  # get grouped counts
+  my $sth = $dbc->prepare($phenotype_feature_grouped_count_st);
+  $sth->execute();
+  my $dat = $sth->fetchall_arrayref();
+  foreach my $l (@{$dat}){
+    $new{phenotype_feature_count_details}{$l->[0]."_".$l->[1]} = $l->[2];
+  }
+
+  return \%new;
+}
+
+=head2 get_old_results
+
+  Example    : $obj->get_old_results()
+  Description: Check internal production database for previous phenotype annotation import information
+               for this species.
+  Returntype : hashref of previous counts
+  Exceptions : none
+
+=cut
+
+sub get_old_results {
+  my  $self = shift;
+
+  return $self->{previous_result} if defined $self->{previous_result};
+
+  my $int_dba ;
+  eval{ $int_dba = $self->get_adaptor('multi', 'intvar');};
+
+  unless (defined $int_dba){
+    $self->warning('No internal database connection found to write status ');
+    return;
+  }
+
+  my %previous_result;
+
+  my $result_adaptor = $int_dba->get_ResultAdaptor();
+  my $res = $result_adaptor->fetch_all_current_by_species($self->required_param('species') );
+
+  foreach my $result (@{$res}){
+
+    if ($result->parameter()){
+      $previous_result{ $result->result_type()."_details" }{$result->parameter()} = $result->result_value();
+    } else {
+      $previous_result{ $result->result_type() } = $result->result_value();
+    }
+  }
+
+  $self->{previous_result} =\%previous_result;
+
+  return $self->{previous_result};
+}
+
+=head2 _count_results
+
+  Arg [1]    : Bio::EnsEMBL::DBSQL::DBConnection $dbc
+               The new variation database connection
+  Arg [2]    : string $st
+               The SQL statement to be run.
+  Example    : $obj->_count_results($dbc, $st)
+  Description: Takes SQL statements to count the rows in a table or count rows grouped
+               by an attribute in the table. It returns either the total number of rows in the
+               table or a hash of attribute => row count depending on input.
+  Returntype : integer or hashref
+  Exceptions : none
+
+=cut
+
+sub _count_results{
+  my ($dbc, $st) = @_;
+
+  my $sth = $dbc->prepare($st);
+  $sth->execute();
+  my $dat = $sth->fetchall_arrayref();
+
+  if(defined $dat->[0]->[1]){
+    my %count;
+    foreach my $l (@{$dat}){
+        $count{$l->[0]} = $l->[1];
+    }
+    return \%count;
+  }
+  else{
+    return $dat->[0]->[0];
+  }
+}
+
 
 1;

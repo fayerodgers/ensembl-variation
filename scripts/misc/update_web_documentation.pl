@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-# Copyright [2016-2019] EMBL-European Bioinformatics Institute
+# Copyright [2016-2020] EMBL-European Bioinformatics Institute
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -273,9 +273,8 @@ print STDOUT localtime() . "\t\t> Phenotype sources list - finished\n";
 # Settings
 $file_name = "species_detailed_counts.html";
 $tmp_file  = $file_name;
-
 print STDOUT localtime() . "\t# Detailed species data count ...\n";
-`perl species_list_detailed_counts.pl -v $version -o $tmp_file -hlist $hlist -phost $phost`;
+`perl species_list_detailed_counts.pl -v $version -o $tmp_file -hlist $hlist -phost $phost --user ensro`;
 
 $copy2subdir = ($no_subdir) ? '' : $subdirs{$file_name};
 copy_updated_file($copy2subdir,$file_name,$tmp_file);

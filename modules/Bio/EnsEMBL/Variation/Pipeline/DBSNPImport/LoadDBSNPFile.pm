@@ -1,6 +1,6 @@
 =head1 LICENSE
 Copyright [1999-2015] Wellcome Trust Sanger Institute and the EMBL-European Bioinformatics Institute
-Copyright [2016-2019] EMBL-European Bioinformatics Institute
+Copyright [2016-2020] EMBL-European Bioinformatics Institute
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -57,16 +57,20 @@ sub run {
   my $data_dir = $self->param_required('data_dir');
   my $rpt_dir = $self->param_required('rpt_dir');
   my $registry_file = $self->param_required('ensembl_registry');
+  my $ancestral_fasta_file = $self->param_required('ancestral_fasta_file');
   my $fasta_file = $self->param_required('fasta_file');
   my $script_dir = $self->param_required('script_dir');
+  my $assembly = $self->param_required('assembly');
 
   $self->warning("filename ($filename)");
   $self->warning("subdir ($sub_dir)");
   $self->warning("data_dir ($data_dir)");
   $self->warning("rpt_dir ($rpt_dir)");
   $self->warning("registry_file ($registry_file)");
+  $self->warning("ancestral_fasta_file ($ancestral_fasta_file)");
   $self->warning("fasta_file ($fasta_file)");
   $self->warning("script_dir ($script_dir)");
+  $self->warning("assembly ($assembly)");
   
   my $load_script = join("/", $script_dir, 'load_dbsnp.pl');
   my $data_dir_run = join("/", $data_dir, $sub_dir);
@@ -83,7 +87,9 @@ sub run {
             '-registry' ,   $registry_file ,
             '-input_file', $input_file,
             '-rpt_dir' ,   $rpt_dir_run,
-            '-fasta_file', $fasta_file);
+            '-ancestral_fasta_file' , $ancestral_fasta_file,
+            '-fasta_file', $fasta_file,
+            '-assembly', $assembly);
   
   $self->warning($cmd);
   # Do the system call
