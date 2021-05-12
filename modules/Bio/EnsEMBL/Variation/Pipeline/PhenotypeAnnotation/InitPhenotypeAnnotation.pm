@@ -94,6 +94,7 @@ sub write_output {
     } elsif ( $run_type eq RNAi){
       $self->dataflow_output_id($self->param('output_ids'), 13);
       print $logPipeFH "Passing to $run_type import \n" if $self->param('debug_mode');
+    }
   }
   close($logPipeFH);
 }
