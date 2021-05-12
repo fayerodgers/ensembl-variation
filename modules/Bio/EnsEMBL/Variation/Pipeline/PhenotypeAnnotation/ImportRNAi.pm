@@ -57,7 +57,8 @@ sub fetch_input {
                   object_type => 'Gene',
 		  somatic_status => 'somatic',
 		  source_name => 'RNAi',
-		  source_name_short => 'RNAi'
+		  source_name_short => 'RNAi',
+    		  source_version => '1'
 		);
 
   #create workdir folder
