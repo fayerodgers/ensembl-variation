@@ -715,16 +715,16 @@ sub _add_phenotypes {
   };
 
   my $st_sel_sr_stmt = qq{
-    SELECT seq_region_id, name
+    SELECT seq_region_id, name, coord_system_id
     FROM seq_region
     WHERE seq_region_id = ?
   };
 
   my $st_ins_sr_stmt = qq{
     INSERT INTO
-      seq_region (seq_region_id, name)
+      seq_region (seq_region_id, name, coord_system_id) 
     VALUES (
-      ?, ?
+      ?, ?, ?
     )
   };
 
@@ -972,6 +972,7 @@ sub _add_phenotypes {
     if ($res->[0] eq $key) {
       $sr_ins_sth->bind_param(1, $key,SQL_INTEGER);
       $sr_ins_sth->bind_param(2, $res->[1],SQL_VARCHAR);
+      $sr_ins_sth->bind_param(3, $res->[2],SQL_INTEGER);
       $sr_ins_sth->execute();
       $self->print_errFH("$key seq_region inserted in variation db\n") if ($self->{debug});
     } else {
